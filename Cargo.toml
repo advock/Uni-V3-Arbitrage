@@ -6,3 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+futures = "0.3.30"
+thiserror = "1.0.37"
+revm = { version = "3.0.0", features = ["ethersdb", "serde", "std"] }
+eyre = "0.6.8"
