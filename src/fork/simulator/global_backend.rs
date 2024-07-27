@@ -1,6 +1,9 @@
+// credit to Foundry's SharedBackend implmenetation:
+// https://github.com/foundry-rs/foundry/blob/master/evm/src/executor/fork/backend.rs
+use ethers::types::H160;
 use ethers::{
     providers::{Middleware, Provider, ProviderError, Ws},
-    types::{Address, BigEndianHash, BlockId, H256, U256},
+    types::{BigEndianHash, BlockId, H256, U256},
     utils::keccak256,
 };
 use eyre::Result;
@@ -13,10 +16,10 @@ use hashbrown::{hash_map::Entry, HashMap};
 use revm::{
     db::{CacheDB, EmptyDB},
     primitives::{
-        bytes, AccountInfo, Address as rAddress, Bytecode, Bytes as rBytes, B256, KECCAK_EMPTY,
-        U256 as rU256,
+        bytes, AccountInfo, Bytecode, Bytes as rBytes, B256, KECCAK_EMPTY, U256 as rU256,
     },
 };
+type rAddress = revm::primitives::Address;
 use std::{
     collections::VecDeque,
     pin::Pin,
@@ -149,14 +152,20 @@ impl GlobalBackend {
                 let block_num = self.block_num;
                 let fut = Box::pin(async move {
                     // convert from revm to ethers
-                    let address_ethers: Address = address.0.into();
+                    let address_ethers: H160 = H160::from_slice(address.as_ref());
 
                     let balance = provider.get_balance(address_ethers, block_num);
                     let nonce = provider.get_transaction_count(address_ethers, block_num);
                     let code = provider.get_code(address_ethers, block_num);
-                    let resp = tokio::try_join!(balance, nonce, code);
-
-                    let resp = resp.map(|(b, n, c)| (b.into(), n.as_u64(), c.0));
+                    let mut resp = tokio::try_join!(balance, nonce, code);
+                    let mut bytes = [0u8; 32];
+                    let resp = resp.map(|(b, n, c)| {
+                        (
+                            rU256::from(b.as_u128()),
+                            n.as_u64(),
+                            rBytes::from(c.to_vec()),
+                        )
+                    });
                     (resp, address)
                 });
                 self.pending_requests.push(FetchRequestFuture::Basic(fut));
@@ -176,17 +185,20 @@ impl GlobalBackend {
                 let block_num = self.block_num;
                 let fut = Box::pin(async move {
                     // convert from revm to ethers type
-                    let idx_ethers = H256::from_uint(&U256::from(idx));
-                    let address_ethers: Address = address.0.into();
+                    let mut id = U256::from_big_endian(&idx.to_be_bytes::<32>());
+                    let idx_ethers = H256::from_uint(&id);
+                    let address_ethers: H160 = H160::from_slice(address.as_ref());
+
                     let storage = provider
                         .get_storage_at(address_ethers, idx_ethers, block_num)
                         .await;
                     let storage = storage.map(|storage| storage.into_uint());
 
                     // convert ethers types to revm types
-                    let storage = storage.map(|s| s.into());
-                    // convert back to revm types
+                    let storage = storage.map(|s| rU256::from(s.as_u128()));
+
                     (storage, address, idx)
+                    // convert back to revm types
                 });
                 self.pending_requests.push(FetchRequestFuture::Storage(fut));
             }
@@ -204,7 +216,8 @@ impl GlobalBackend {
                 let provider = self.provider.clone();
                 let fut = Box::pin(async move {
                     // convert from revm to ethers type
-                    let number_ethers: u64 = U256::from(number).as_u64();
+                    let number_ethers: u64 =
+                        U256::from_big_endian(&number.to_be_bytes::<32>()).as_u64();
                     let block = provider.get_block(number_ethers).await;
 
                     let block_hash = match block {
@@ -281,7 +294,7 @@ impl Future for GlobalBackend {
                             let (code, code_hash) = if !code.is_empty() {
                                 (Some(code.clone()), keccak256(&code).into())
                             } else {
-                                (Some(bytes::Bytes::default()), KECCAK_EMPTY)
+                                (Some(revm::primitives::Bytes::default()), KECCAK_EMPTY)
                             };
 
                             // update the cache

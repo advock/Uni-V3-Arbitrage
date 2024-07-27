@@ -11,10 +11,8 @@ use revm::{
     Database, DatabaseCommit,
 };
 
-use super::{
-    data_base_errors::{DatabaseError, DatabaseResult},
-    BackendFetchRequest,
-};
+use super::data_base_errors::{DatabaseError, DatabaseResult};
+use crate::fork::simulator::global_backend::BackendFetchRequest;
 
 pub struct ForkDB {
     backend: Sender<BackendFetchRequest>,
