@@ -1,3 +1,5 @@
+use EThDexMev::helper;
+
 fn main() {
-    println!("Hello, world!");
+    helper::bind("UniV3Factory", "src/abi/UniV3Factory.json");
 }
