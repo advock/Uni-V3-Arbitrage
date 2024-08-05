@@ -12,6 +12,7 @@ pub struct Config {
     pub wallet: Arc<Wallet<SigningKey>>,
 
     pub wss_log: Arc<Provider<Ws>>,
+    pub graph_url: String,
 }
 
 impl Config {
@@ -39,12 +40,15 @@ impl Config {
             }
         };
 
+        let graph_url = std::env::var("GRAPH_API").unwrap();
+
         let middleware = Arc::new(SignerMiddleware::new(provider, wallet.clone()));
         Self {
             http: middleware,
             wss: Arc::new(ws_provider),
             wallet: Arc::new(wallet),
             wss_log: Arc::new(wsl_provider),
+            graph_url,
         }
     }
 }

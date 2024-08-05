@@ -1,3 +1,4 @@
+use crate::contract_modules::UniV3::types::{Pools, UniV3Data};
 use crate::contract_modules::{self, UniV3::types::UniV3Pool};
 use ethers::abi::{AbiDecode, Token};
 use ethers::prelude::*;
@@ -12,23 +13,26 @@ use crate::state::State;
 
 pub async fn start_updater(ws_provider: Arc<Provider<Ws>>, from: U64) {
     let now = Instant::now();
+    eprintln!("sfbhsfbhbs");
 
     let decode = hex::decode(SYNC).unwrap();
     let sync_topic = H256::from_slice(&decode);
 
     let mut from = from;
 
-    let block = match ws_provider.get_block_number().await {
-        Ok(d) => d,
-        Err(err) => {
-            error!("An error occurred: {}", err);
-            return;
-        }
-    };
+    // let block = match ws_provider.get_block_number().await {
+    //     Ok(d) => d,
+    //     Err(err) => {
+    //         error!("An error occurred: {}", err);
+    //         return;
+    //     }
+    // };
+    eprintln!("sfbhsfbhbs");
 
-    while from < block {
-        info!("block {:?}", block);
-        update_block(ws_provider.clone(), block, sync_topic);
+    while from < U64::from(20074630) {
+        eprintln!("block {:?}", from);
+        update_block(ws_provider.clone(), from, sync_topic).await;
+        from += U64::one();
     }
 }
 
@@ -63,27 +67,25 @@ async fn update_block(ws_provider: Arc<Provider<Ws>>, block: U64, sync_topic: H2
         if let Some(full_tx) = tx_recipt {
             let logs = full_tx.logs;
             for log in logs {
-                for topic in log.topics {
-                    if topic == sync_topic {
-                        let pool = Address::from_slice(&log.data[32..]);
-                        info!("address of pool is {:?}", pool);
-                        pairs.push(pool);
+                for topic in &log.topics {
+                    if *topic == sync_topic {
+                        eprintln!("got pool");
+                        let pool = Address::from_slice(&log.data[44..64]);
+                        eprintln!("address of pool is {:?}", pool);
 
-                        // let (token0, token1, pool): (Address, Address, Address) =
-                        //     match AbiDecode::decode(&log.data) {
-                        //         Ok(decoded) => decoded,
-                        //         Err(_) => continue,
-                        //     };
+                        let x = Pools {
+                            address: pool,
+                            token0: Address::from_slice(&log.topics[1].as_bytes()[12..]),
+                            token1: Address::from_slice(&log.topics[2].as_bytes()[12..]),
+                        };
 
-                        // let fee: U256 = U256::from_big_endian(&topic[3].as_bytes());
-                        // let (tick_spacing, pool): (i32, Address) =
-                        //     match AbiDecode::decode(&log.data) {
-                        //         Ok(decoded) => decoded,
-                        //         Err(_) => continue,
-                        //     };
+                        pairs.push(x);
                     }
                 }
             }
         }
     }
+
+    let pairs = UniV3Data::new(pairs);
+    pairs.save_to_file("uni_v3_pools").unwrap();
 }

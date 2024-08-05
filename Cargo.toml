@@ -6,14 +6,17 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+reqwest = { version = "0.11", features = ["json", "default-tls", "rustls-tls"] }
 ethers = { git = "https://github.com/gakonst/ethers-rs", features = [
     "ws",
     "rustls",
     "abigen",
     "ipc",
 ] }
+csv = "1.1"
 tokio = { version = "1.5", features = ["macros", "rt-multi-thread"] }
-
+dotenv = "0.15.0"
+env_logger = "0.9"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 hex = "0.4.3"
