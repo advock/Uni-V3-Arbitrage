@@ -30,9 +30,13 @@ Create a .env file in the project root with the following content:
 env
 Copy code
 NETWORK_HTTP=<your-http-provider>
+
 NETWORK_WSS=<your-websocket-provider>
+
 NETWORK_WSS_LOGS=<your-wss-logs-provider>
+
 PRIVATE_KEY=<your-private-key>
+
 GRAPH_API=<your-graph-api-url>
 Usage
 To run the project, use the following command:
