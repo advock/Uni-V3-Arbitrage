@@ -17,9 +17,8 @@ use uniV3PoolGetter::AllPools;
 use EThDexMev::{config::Config, helper, uniV3PoolGetter, updater};
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
+async fn main() {
     dotenv().ok();
     let file_name = "pools_output";
-    get_pools_list(file_name).await?;
-    Ok(())
+    get_pools_list(file_name).await.unwrap();
 }

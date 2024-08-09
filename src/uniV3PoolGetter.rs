@@ -11,6 +11,16 @@ struct GraphQLQuery {
 }
 
 #[derive(Deserialize, Serialize, Debug)]
+struct Poo {
+    id: String,
+}
+
+#[derive(Deserialize, Serialize, Debug)]
+struct Pools {
+    pools: Vec<Poo>,
+}
+
+#[derive(Deserialize, Serialize, Debug)]
 struct PoolsData {
     pools: Vec<Pool>,
 }
@@ -88,7 +98,7 @@ async fn fetch_pools(
     client: &Client,
     endpoint: &str,
     skip: usize,
-) -> Result<Vec<Pool>, Box<dyn Error>> {
+) -> Result<Vec<Poo>, Box<dyn Error + Send + Sync>> {
     let query = GraphQLQuery {
         query: format!(
             r#"
@@ -101,9 +111,13 @@ async fn fetch_pools(
             skip
         ),
     };
+    eprint!("   whaaaat ");
 
     let response = client.post(endpoint).json(&query).send().await?;
-    let json: GraphQLResponse<PoolsData> = response.json().await?;
+
+    let json: GraphQLResponse<Pools> = response.json().await?;
+
+    eprint!("   whaaaat 3");
 
     if let Some(errors) = json.errors {
         for error in errors {
@@ -117,14 +131,17 @@ async fn fetch_pools(
 
 pub async fn get_pools_list(file_name: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
     let config = Config::new().await;
-    let endpoint: &str = &config.graph_url;
+    let endpoint = &*config.graph_url;
     let client = Client::new();
+    eprint!("sncjnsdcjhsn");
 
     let mut all_pools = Vec::new();
     let mut skip = 0;
 
     loop {
-        let pools = fetch_pools(&client, endpoint, skip).await.unwrap();
+        eprint!("csjnjcn");
+        let pools = fetch_pools(&client, endpoint, skip).await?;
+        eprint!("   nscjnsjcn   ");
         if pools.is_empty() {
             break;
         }
@@ -136,21 +153,17 @@ pub async fn get_pools_list(file_name: &str) -> Result<(), Box<dyn Error + Send 
         println!("Pool address: {}", pool.id);
     }
 
-    let pairs = AllPools::new(all_pools.clone(), all_pools.len());
-
-    pairs.save_to_file(file_name).unwrap();
-
-    let mut all_pools: Vec<Pool> = Vec::new();
-    for address in &pairs.pools {
-        if let Some(pool) = fetch_pool_details(&client, &endpoint, &address.id).await? {
-            all_pools.push(pool);
+    let mut pools: Vec<Pool> = Vec::new();
+    for address in &all_pools {
+        if let Some(pool) = fetch_pool_details(&client, &endpoint, &*address.id).await? {
+            pools.push(pool);
+            eprint!("added");
         }
     }
 
-    let pools = PoolsData::new(all_pools.clone());
-    pools.save_to_file("pool_data").unwrap();
+    let pools = PoolsData::new(pools.clone());
+    pools.save_to_file(file_name)?;
 
-    // Here you can handle `all_pools` as needed, e.g., save to a file or process further
     println!("Fetched detailed data for {} pools", all_pools.len());
     Ok(())
 }
