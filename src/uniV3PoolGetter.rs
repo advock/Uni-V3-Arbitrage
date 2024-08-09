@@ -50,7 +50,7 @@ struct PoolData {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
-struct AllPools {
+pub struct AllPools {
     pools: Vec<Pool>,
     length: usize,
 }
@@ -115,7 +115,7 @@ async fn fetch_pools(
     Ok(json.data.pools)
 }
 
-pub async fn get_pools_list(file_name: &str) -> Result<AllPools, Box<dyn Error>> {
+pub async fn get_pools_list(file_name: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
     let config = Config::new().await;
     let endpoint: &str = &config.graph_url;
     let client = Client::new();
@@ -148,19 +148,18 @@ pub async fn get_pools_list(file_name: &str) -> Result<AllPools, Box<dyn Error>>
     }
 
     let pools = PoolsData::new(all_pools.clone());
-    pools.save_to_file("pool_data");
+    pools.save_to_file("pool_data").unwrap();
 
     // Here you can handle `all_pools` as needed, e.g., save to a file or process further
     println!("Fetched detailed data for {} pools", all_pools.len());
-
-    Ok(pairs)
+    Ok(())
 }
 
 async fn fetch_pool_details(
     client: &Client,
     endpoint: &str,
     pool_address: &str,
-) -> Result<Option<Pool>, Box<dyn Error>> {
+) -> Result<Option<Pool>, Box<dyn Error + Send + Sync>> {
     let query = GraphQLQuery {
         query: format!(
             r#"
