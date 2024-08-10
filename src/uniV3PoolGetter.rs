@@ -1,9 +1,15 @@
 use crate::config::Config;
+use futures::future::join_all;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fs::File;
 use std::io::Write;
+use std::sync::Arc;
+use tokio::task;
+use tokio::time::{sleep, Duration};
+
+const CONCURRENT_LIMIT: usize = 100;
 
 #[derive(Serialize)]
 struct GraphQLQuery {
@@ -131,7 +137,7 @@ async fn fetch_pools(
 
 pub async fn get_pools_list(file_name: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
     let config = Config::new().await;
-    let endpoint = &*config.graph_url;
+    let endpoint = Arc::new(config.graph_url.clone());
     let client = Client::new();
     eprint!("sncjnsdcjhsn");
 
@@ -140,7 +146,7 @@ pub async fn get_pools_list(file_name: &str) -> Result<(), Box<dyn Error + Send 
 
     loop {
         eprint!("csjnjcn");
-        let pools = fetch_pools(&client, endpoint, skip).await?;
+        let pools = fetch_pools(&client, &endpoint, skip).await?;
         eprint!("   nscjnsjcn   ");
         if pools.is_empty() {
             break;
@@ -153,18 +159,73 @@ pub async fn get_pools_list(file_name: &str) -> Result<(), Box<dyn Error + Send 
         println!("Pool address: {}", pool.id);
     }
 
-    let mut pools: Vec<Pool> = Vec::new();
-    for address in &all_pools {
-        if let Some(pool) = fetch_pool_details(&client, &endpoint, &*address.id).await? {
-            pools.push(pool);
-            eprint!("added");
+    let mut results = Vec::new();
+    let mut tasks = Vec::new();
+
+    for address in all_pools.iter() {
+        let client = client.clone();
+        let endpoint = Arc::clone(&endpoint);
+        let pool_address = address.id.clone();
+
+        let task =
+            tokio::spawn(
+                async move { fetch_pool_details(&client, &endpoint, &pool_address).await },
+            );
+
+        tasks.push(task);
+
+        if tasks.len() >= CONCURRENT_LIMIT {
+            let finished_tasks: Vec<_> = join_all(tasks).await;
+            results.extend(
+                finished_tasks
+                    .into_iter()
+                    .filter_map(|result| match result {
+                        Ok(inner_result) => match inner_result {
+                            Ok(Some(pool)) => Some(pool),
+                            Ok(None) => None,
+                            Err(e) => {
+                                eprintln!("Error fetching pool details: {}", e);
+                                None
+                            }
+                        },
+                        Err(join_error) => {
+                            eprintln!("Task join error: {}", join_error);
+                            None
+                        }
+                    }),
+            );
+            eprint!("before task");
+            tasks = Vec::new();
+            sleep(Duration::from_millis(100)).await; // Small delay to prevent hitting limits
         }
     }
 
-    let pools = PoolsData::new(pools.clone());
+    if !tasks.is_empty() {
+        let finished_tasks: Vec<_> = join_all(tasks).await;
+        results.extend(
+            finished_tasks
+                .into_iter()
+                .filter_map(|result| match result {
+                    Ok(inner_result) => match inner_result {
+                        Ok(Some(pool)) => Some(pool),
+                        Ok(None) => None,
+                        Err(e) => {
+                            eprintln!("Error fetching pool details: {}", e);
+                            None
+                        }
+                    },
+                    Err(join_error) => {
+                        eprintln!("Task join error: {}", join_error);
+                        None
+                    }
+                }),
+        );
+    }
+
+    let pools = PoolsData::new(results.clone());
     pools.save_to_file(file_name)?;
 
-    println!("Fetched detailed data for {} pools", all_pools.len());
+    println!("Fetched detailed data for {} pools", results.len());
     Ok(())
 }
 
