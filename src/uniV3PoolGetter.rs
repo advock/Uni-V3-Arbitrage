@@ -1,4 +1,5 @@
 use crate::config::Config;
+use ethers::types::Address;
 use futures::future::join_all;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -45,19 +46,19 @@ impl PoolsData {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
-struct Pool {
-    id: String,
-    token0: Token,
-    token1: Token,
-    liquidity: String,
-    volumeUSD: String,
+pub struct Pool {
+    pub id: Address,
+    pub token0: Token,
+    pub token1: Token,
+    pub liquidity: String,
+    pub volumeUSD: String,
 }
 
 #[derive(Deserialize, Debug, Clone, Serialize)]
-struct Token {
-    id: String,
-    symbol: String,
-    name: String,
+pub struct Token {
+    pub id: Address,
+    pub symbol: String,
+    pub name: String,
 }
 
 #[derive(Deserialize, Debug)]
