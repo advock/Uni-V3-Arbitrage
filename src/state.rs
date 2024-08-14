@@ -1,4 +1,5 @@
 use crate::constants::WETH;
+use crate::contract_modules::UniV3::types::Pools;
 use crate::helper;
 use crate::{contract_modules::UniV3::types::UniV3Pool, uniV3PoolGetter};
 use abi::Hash;
@@ -33,12 +34,14 @@ pub struct State {
     pub pairs_mapping: HashMap<usize, RefCell<Pool>>,
     /// For easy access at pending state
     pub cycles_mapping: HashMap<Address, Vec<Cycle>>,
+    // Mapping from usize to pool reserve
+    pub pool_mapping: HashMap<usize, Pools>,
     // Real state of reserves to re apply after calc
     real_reserve_state: RefCell<HashMap<usize, [U256; 2]>>,
 }
 
 impl State {
-    pub fn new_state(pairs: &[uniV3PoolGetter::Pool]) {
+    pub fn new_state(pairs: &[uniV3PoolGetter::Pool]) -> Self {
         let mut address_mapping = HashMap::new();
         let mut index_mapping = HashMap::new();
         let mut pairs_mapping = HashMap::new();
@@ -63,8 +66,10 @@ impl State {
                 index_mapping.insert(current_len, pair.token1.id);
                 address_mapping.insert(pair.token1.id, current_len);
             }
-        }
 
+            eprint!("in pairs iter");
+        }
+        eprint!("pairs done");
         let mut indexed_pairs = Vec::new();
 
         for pair in pairs {
@@ -79,21 +84,51 @@ impl State {
                 *address_mapping.get(&pair.id).unwrap(),
                 RefCell::new(pair.clone()),
             );
+
+            eprint!("pairs 2");
         }
 
-        let WETH_index = *address_mapping
+        eprint!("pairs 3");
+        let weth_index = *address_mapping
             .get(&helper::convert_to_address(WETH))
             .unwrap();
 
         let cycles = Self::find_cycles(
             &indexed_pairs,
-            WETH_index,
-            WETH_index,
+            weth_index,
+            weth_index,
             4,
             &Vec::new(),
             &mut Vec::new(),
             &mut HashSet::new(),
         );
+        eprint!("pairs 4");
+        let mut cycles_mapping = HashMap::new();
+
+        for indexed_cycle in cycles.iter() {
+            for indexed_pair in indexed_cycle {
+                cycles_mapping
+                    .entry(index_mapping[&indexed_pair.address])
+                    .or_insert_with(Vec::new)
+                    .push(indexed_cycle.clone());
+            }
+        }
+
+        let real_reserve_state = RefCell::new(HashMap::new());
+        let pool_mapping: HashMap<usize, Pools> = HashMap::new();
+
+        eprint!("wtf ");
+
+        let state = Self {
+            index_mapping,
+            address_mapping,
+            pairs_mapping,
+            cycles_mapping,
+            pool_mapping,
+            real_reserve_state,
+        };
+
+        state
     }
 
     fn find_cycles(

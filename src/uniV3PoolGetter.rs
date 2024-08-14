@@ -28,8 +28,8 @@ struct Pools {
 }
 
 #[derive(Deserialize, Serialize, Debug)]
-struct PoolsData {
-    pools: Vec<Pool>,
+pub struct PoolsData {
+    pub pools: Vec<Pool>,
 }
 
 impl PoolsData {
@@ -42,6 +42,13 @@ impl PoolsData {
         let serialized = serde_json::to_string_pretty(self)?;
         file.write_all(serialized.as_bytes())?;
         Ok(())
+    }
+
+    pub fn load_from_file(file_path: &str) -> std::io::Result<PoolsData> {
+        let file = File::open(file_path)?;
+        let reader = std::io::BufReader::new(file);
+        let storage: PoolsData = serde_json::from_reader(reader)?;
+        Ok(storage)
     }
 }
 

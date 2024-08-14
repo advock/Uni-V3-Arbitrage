@@ -1,6 +1,7 @@
 use ethers::prelude::k256::ecdsa::SigningKey;
 use ethers::prelude::*;
 use ethers::providers::Provider;
+use log::info;
 use std::sync::Arc;
 
 pub struct Config {
@@ -22,6 +23,7 @@ impl Config {
         let provider: Provider<Http> = Provider::<Http>::try_from(http_url).unwrap();
 
         let wss_url = std::env::var("NETWORK_WSS").expect("missing NETWORK_WSS");
+        eprint!("{:?}", wss_url);
         let ws_provider: Provider<Ws> = Provider::<Ws>::connect(wss_url).await.unwrap();
 
         let wss_log_url = std::env::var("NETWORK_WSS_LOGS").expect("missing new logs");

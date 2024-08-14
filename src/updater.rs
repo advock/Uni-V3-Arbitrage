@@ -11,7 +11,7 @@ use tokio::sync::Mutex;
 use crate::constants::SYNC;
 use crate::state::State;
 
-pub async fn start_updater(ws_provider: Arc<Provider<Ws>>, from: U64) {
+pub async fn start_updater(ws_provider: Arc<Provider<Ws>>, state: Arc<Mutex<State>>, from: U64) {
     let now = Instant::now();
     eprintln!("sfbhsfbhbs");
 
@@ -20,18 +20,19 @@ pub async fn start_updater(ws_provider: Arc<Provider<Ws>>, from: U64) {
 
     let mut from = from;
 
-    // let block = match ws_provider.get_block_number().await {
-    //     Ok(d) => d,
-    //     Err(err) => {
-    //         error!("An error occurred: {}", err);
-    //         return;
-    //     }
-    // };
+    let block = match ws_provider.get_block_number().await {
+        Ok(d) => d,
+        Err(err) => {
+            error!("An error occurred: {}", err);
+            return;
+        }
+    };
     eprintln!("sfbhsfbhbs");
 
     while from < U64::from(20074630) {
         eprintln!("block {:?}", from);
-        update_block(ws_provider.clone(), from, sync_topic).await;
+        update_block(ws_provider.clone(), state.clone(), from, sync_topic).await;
+        eprint!("block {:?}", from);
         from += U64::one();
     }
 }
@@ -44,7 +45,12 @@ pub async fn loop_block(
     info!("block updater started ");
 }
 
-async fn update_block(ws_provider: Arc<Provider<Ws>>, block: U64, sync_topic: H256) {
+async fn update_block(
+    ws_provider: Arc<Provider<Ws>>,
+    state: Arc<Mutex<State>>,
+    block: U64,
+    sync_topic: H256,
+) {
     let block: Block<TxHash> = match ws_provider.get_block(block).await {
         Ok(Some(d)) => d,
         Ok(None) => return,
@@ -53,8 +59,6 @@ async fn update_block(ws_provider: Arc<Provider<Ws>>, block: U64, sync_topic: H2
             return;
         }
     };
-
-    let mut pairs = vec![];
 
     let txes = block.transactions;
 
@@ -65,8 +69,15 @@ async fn update_block(ws_provider: Arc<Provider<Ws>>, block: U64, sync_topic: H2
         };
 
         if let Some(full_tx) = tx_recipt {
+            let mut state_unlocked: tokio::sync::MutexGuard<State> = state.lock().await;
+
             let logs = full_tx.logs;
             for log in logs {
+                let pointer = match state_unlocked.address_mapping.get(&log.address) {
+                    Some(d) => *d,
+                    None => continue,
+                };
+
                 for topic in &log.topics {
                     if *topic == sync_topic {
                         eprintln!("got pool");
@@ -79,13 +90,10 @@ async fn update_block(ws_provider: Arc<Provider<Ws>>, block: U64, sync_topic: H2
                             token1: Address::from_slice(&log.topics[2].as_bytes()[12..]),
                         };
 
-                        pairs.push(x);
+                        state_unlocked.pool_mapping.insert(pointer, x);
                     }
                 }
             }
         }
     }
-
-    let pairs = UniV3Data::new(pairs);
-    pairs.save_to_file("uni_v3_pools").unwrap();
 }
