@@ -7,6 +7,8 @@ use ethers::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::fs::File;
+use std::io::Write;
 use uniV3PoolGetter::Pool;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -24,6 +26,18 @@ pub struct Cycles {
 }
 
 pub type Cycle = Vec<IndexedPair>;
+
+impl Cycles {
+    pub fn new(cycles: Vec<Vec<IndexedPair>>, block: U256) -> Self {
+        Self { cycles, block }
+    }
+    pub fn save_to_file(&self, file: &str) -> std::io::Result<()> {
+        let mut file = File::create(file)?;
+        let serialized = serde_json::to_string_pretty(self)?;
+        file.write_all(serialized.as_bytes())?;
+        Ok(())
+    }
+}
 
 pub struct State {
     /// For indexed pointer to address
@@ -97,15 +111,20 @@ impl State {
             &indexed_pairs,
             weth_index,
             weth_index,
-            4,
+            3,
             &Vec::new(),
             &mut Vec::new(),
             &mut HashSet::new(),
         );
+
+        let cyc = Cycles::new(cycles.clone(), U256::one());
+        cyc.save_to_file("cycles").unwrap();
+
         eprint!("pairs 4");
         let mut cycles_mapping = HashMap::new();
 
         for indexed_cycle in cycles.iter() {
+            eprintln!("{:?}", indexed_cycle);
             for indexed_pair in indexed_cycle {
                 cycles_mapping
                     .entry(index_mapping[&indexed_pair.address])
@@ -140,6 +159,7 @@ impl State {
         circles: &mut Vec<Cycle>,
         seen: &mut HashSet<usize>,
     ) -> Vec<Cycle> {
+        eprintln!("{:?}", current_pairs);
         let mut circles_copy = circles.clone();
 
         for pair in pairs {
