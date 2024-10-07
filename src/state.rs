@@ -118,7 +118,7 @@ impl State {
         );
 
         let cyc = Cycles::new(cycles.clone(), U256::one());
-        cyc.save_to_file("cycles").unwrap();
+        cyc.save_to_file("new_cycle").unwrap();
 
         eprint!("pairs 4");
         let mut cycles_mapping = HashMap::new();
