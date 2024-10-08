@@ -8,10 +8,12 @@ pub mod helper;
 pub mod intractor;
 use ethers::prelude::*;
 use eyre::Ok;
+use helper::revm_call;
 use log::info;
 pub mod recon;
 use std::cell::RefCell;
 pub mod calculate;
+use std::rc::Rc;
 pub mod state;
 use crate::contract_modules::UniV3::bindings::UniswapV3Router;
 use crate::contract_modules::UniV3::types::UniV3Pool;
@@ -23,6 +25,7 @@ use constants::EXECUATOR_ADDRESS;
 use crossbeam_channel::unbounded;
 use dotenv::dotenv;
 use ethers::abi::Address;
+use ethers::types::Bytes as ethBytes;
 use ethers::types::U256 as u652;
 use ethers::{
     contract::abigen,
@@ -71,14 +74,19 @@ pub async fn run() {
 
     let config = Config::new().await;
 
-    // let http_url = std::env::var("NETWORK_HTTP").expect("missing NETWORK_RPC");
-    // let provider = ProviderBuilder::new().on_http(http_url.parse().unwrap());
-    // let provider = Arc::new(provider);
+    let http_url = std::env::var("NETWORK_HTTP").expect("missing NETWORK_RPC");
+    let provider = ProviderBuilder::new().on_http(http_url.parse().unwrap());
+    let provider = Arc::new(provider);
+
+    let mut cache_db = init_cache_db(provider);
 
     // now that we have catche file.
     // now we need to find profitable cycles and then we will simulate that 0n cache dp
     // first to find profitable cycle we need to get the tx that's hitting mem pool
     // soooo
+
+    let decoded = hex::decode(constants::SWAP).unwrap();
+    let swap_topic = H256::from_slice(&decoded);
 
     let block_oracle = states::block_state::BlockOracle::new(config.wss.clone())
         .await
@@ -96,10 +104,44 @@ pub async fn run() {
     // what should this recon function do and how should it send txs here ?
 
     loop {
-        let data = r.recv().unwrap();
+        let main_data: recon::mempool::FutureTx = r.recv().unwrap();
         info!("tx received");
         let mut state: tokio::sync::MutexGuard<State> = state.lock().await;
-        //let mut affected_pairs = Vec::new();
+
+        let mut affected_pairs = Vec::new();
+
+        for log in main_data.logs {
+            let topics = match log.topics {
+                Some(d) => d,
+                None => continue,
+            };
+            let data = match log.data {
+                Some(d) => d,
+                None => continue,
+            };
+
+            let address = match log.address {
+                Some(d) => d,
+                None => continue,
+            };
+
+            for tpoic in topics {
+                if tpoic == swap_topic {
+                    affected_pairs.push(address);
+                    // here we need to call this function on revm
+                    revm_call(
+                        Add::from(main_data.tx.from.0),
+                        Add::from(main_data.tx.to.unwrap().0),
+                        ethers_to_revm(main_data.tx.input.clone()),
+                        &mut cache_db,
+                    )
+                    .unwrap();
+                }
+            }
+        }
+
+        let mut potential_cycles =
+            cal_cycle_profit(&state, Some(affected_pairs.clone()), &mut cache_db);
     }
 }
 
@@ -110,6 +152,8 @@ pub fn cal_cycle_profit(
     cache_db: &mut AlloyCacheDB,
 ) -> Vec<NetPositiveCycle> {
     let mut pointers: Vec<&Vec<crate::state::IndexedPair>> = Vec::new();
+
+    let cache_db = Rc::new(RefCell::new(cache_db));
 
     match affected_pair {
         Some(affected_pair) => {
@@ -136,8 +180,9 @@ pub fn cal_cycle_profit(
             .collect::<Vec<&RefCell<Pool>>>();
 
         let pairs_clone: Vec<&RefCell<Pool>> = pairs.clone();
-        let profit_function =
-            move |amount_in: U256| -> I256 { get_profit(weth, amount_in, &pairs_clone).unwrap() };
+        let profit_function = move |amount_in: U256| -> I256 {
+            get_profit(weth, amount_in, &pairs_clone, cache_db).unwrap()
+        };
 
         let optimal: u652 = maximize_profit(
             u652::one(),
@@ -171,12 +216,19 @@ pub fn get_profit_of_cycle(amount_in: u652, token_in: Address) -> (I256, Vec<u65
     unimplemented!()
 }
 
-pub fn get_profit(asset_in: Address, amount_in: U256, pairs: &Vec<&RefCell<Pool>>) -> Result<I256> {
-    let http_url = std::env::var("NETWORK_HTTP").expect("missing NETWORK_RPC");
-    let provider = ProviderBuilder::new().on_http(http_url.parse().unwrap());
-    let provider = Arc::new(provider);
-    let mut cache_db = init_cache_db(provider);
+pub fn get_profit(
+    asset_in: Address,
+    amount_in: U256,
+    pairs: &Vec<&RefCell<Pool>>,
+    cache_db: Rc<RefCell<AlloyCacheDB>>,
+) -> Result<I256> {
+    // let http_url = std::env::var("NETWORK_HTTP").expect("missing NETWORK_RPC");
+    // let provider = ProviderBuilder::new().on_http(http_url.parse().unwrap());
+    // let provider = Arc::new(provider);
+    //let mut cache_db = init_cache_db(provider);
     // Use eyre::Result for error handling
+
+    let mut cache_db = cache_db.borrow_mut();
     let mut amount_out: U256 = amount_in;
     let mut token_in: Address = asset_in;
     for pair in pairs {
@@ -239,3 +291,7 @@ pub fn volumes(from: U256, to: U256, count: usize) -> Vec<U256> {
 //     u256.to_little_endian(&mut bytes); // fill bytes with U256 data
 //     Uint::<256, 4>::from_le_bytes(bytes)
 // }
+
+fn ethers_to_revm(ethers_bytes: ethBytes) -> Bytes {
+    Bytes(ethers_bytes.0) // Access the inner Vec<u8> and construct revm::Bytes
+}
