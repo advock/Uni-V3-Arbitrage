@@ -15,8 +15,8 @@ pub mod state;
 use crate::contract_modules::UniV3::bindings::UniswapV3Router;
 use crate::contract_modules::UniV3::types::UniV3Pool;
 use crate::uniV3PoolGetter::PoolsData;
-use anyhow::{anyhow, Result};
 use constants::UniswapV3Pool;
+use constants::EXECUATOR_ADDRESS;
 use crossbeam_channel::unbounded;
 use dotenv::dotenv;
 use ethers::abi::Address;
@@ -25,7 +25,10 @@ use ethers::{
     providers::{Middleware, Provider},
     types::H256,
 };
-use revm::primitives::alloy_primitives::Uint;
+use eyre::{Report, Result};
+use intractor::decode_get_amount_out_response;
+use revm::primitives::alloy_primitives::{Uint, I256, U256};
+
 use revm::primitives::Address as Add;
 use revm::primitives::Bytes;
 use revm::primitives::{ExecutionResult, TransactTo};
@@ -37,6 +40,7 @@ pub mod uniV3PoolGetter;
 use crate::config::Config;
 use std::sync::Arc;
 pub mod updater;
+use helper::revm_revert;
 pub mod utils;
 use crate::constants::WETH;
 use crate::state::State;
@@ -98,7 +102,11 @@ pub async fn run() {
 }
 
 // input all the potential cycles of affected pair:
-pub fn cal_cycle_profit(state: &MutexGuard<State>, affected_pair: Option<Vec<Address>>) {
+pub fn cal_cycle_profit(
+    state: &MutexGuard<State>,
+    affected_pair: Option<Vec<Address>>,
+    cache_db: &mut AlloyCacheDB,
+) {
     let mut pointers: Vec<&Vec<crate::state::IndexedPair>> = Vec::new();
 
     match affected_pair {
@@ -126,31 +134,63 @@ pub fn cal_cycle_profit(state: &MutexGuard<State>, affected_pair: Option<Vec<Add
             .filter_map(|pair| state.pairs_mapping.get(&pair.address))
             .collect::<Vec<&RefCell<Pool>>>();
 
+        let mut cache_clone = cache_db.clone();
         let pairs_clone: Vec<&RefCell<Pool>> = pairs.clone();
-        let profit_function =
-            move |amount_in: U256| -> I256 { get_profit(weth, amount_in, &pairs_clone) };
+        let profit_function = move |amount_in: U256| -> I256 {
+            get_profit(weth, amount_in, &pairs_clone, &mut cache_clone).unwrap()
+        };
 
         // here we need ti change get_profit
     }
 }
 
-pub fn get_profit(asset_in: Address, amount_in: U256, pairs: &Vec<&RefCell<Pool>>) -> I256 {
+pub fn get_profit(
+    asset_in: Address,
+    amount_in: U256,
+    pairs: &Vec<&RefCell<Pool>>,
+    cache_db: &mut AlloyCacheDB,
+) -> Result<I256> {
+    // Use eyre::Result for error handling
     let mut amount_out: U256 = amount_in;
+    let mut token_in: Address = asset_in;
     for pair in pairs {
         let pair = pair.borrow();
-        let input = convert_u256_to_uint256(amount_in);
-
-        let x = Add::from(pair.id.0);
+        let input = amount_out;
+        let token_out: Address;
+        if token_in == pair.token0.id {
+            token_out = pair.token1.id
+        } else {
+            token_out = pair.token0.id
+        }
 
         let calldata = get_amount_out_calldata(
             Add::from(pair.id.0),
-            Add::from((Address::from_str(WETH)).unwrap().0),
-            Add::from(pair.token1.id.0),
+            Add::from(token_in.0),
+            Add::from(token_out.0),
             input,
         );
+
+        if token_in == pair.token0.id {
+            token_in = pair.token1.id
+        } else {
+            token_in = pair.token0.id
+        }
+
+        // Return errors as eyre::Result<_, Report>
+        let response: Bytes = revm_revert(
+            Add::from_str(EXECUATOR_ADDRESS).unwrap(),
+            Add::from(pair.id.0),
+            calldata,
+            cache_db,
+        )
+        .unwrap();
+
+        amount_out = U256::try_from(decode_get_amount_out_response(response).unwrap()).unwrap();
+
+        print!("{:?} amount out {:?} -------", pair.token1.id, amount_out);
     }
 
-    U256::one();
+    Ok(I256::from_raw(amount_out) - I256::from_raw(amount_in)) // Return I256 as Ok
 }
 
 pub fn volumes(from: U256, to: U256, count: usize) -> Vec<U256> {
@@ -168,8 +208,8 @@ pub fn volumes(from: U256, to: U256, count: usize) -> Vec<U256> {
     volumes
 }
 
-fn convert_u256_to_uint256(u256: U256) -> Uint<256, 4> {
-    let mut bytes = [0u8; 32]; // U256 is 32 bytes
-    u256.to_little_endian(&mut bytes); // fill bytes with U256 data
-    Uint::<256, 4>::from_le_bytes(bytes)
-}
+// fn convert_u256_to_uint256(u256: U256) -> Uint<256, 4> {
+//     let mut bytes: [u8; 32] = [0u8; 32]; // U256 is 32 bytes
+//     u256.to_little_endian(&mut bytes); // fill bytes with U256 data
+//     Uint::<256, 4>::from_le_bytes(bytes)
+// }
