@@ -1,3 +1,4 @@
+pub mod abi;
 pub mod config;
 pub mod constants;
 pub mod contract_modules;
@@ -6,6 +7,10 @@ pub mod filter;
 pub mod fork;
 pub mod helper;
 pub mod intractor;
+use abi::convert_u256_to_uint256;
+use abi::decode_get_cycle_return_response;
+use abi::get_cycle_calldata;
+use abi::PoolSequence;
 use ethers::prelude::*;
 use eyre::Ok;
 use helper::revm_call;
@@ -18,6 +23,7 @@ pub mod state;
 use crate::contract_modules::UniV3::bindings::UniswapV3Router;
 use crate::contract_modules::UniV3::types::UniV3Pool;
 use crate::uniV3PoolGetter::PoolsData;
+use anyhow::Result;
 use calculate::maximize_profit;
 use calculate::NetPositiveCycle;
 use constants::UniswapV3Pool;
@@ -32,7 +38,7 @@ use ethers::{
     providers::{Middleware, Provider},
     types::H256,
 };
-use eyre::{Report, Result};
+use eyre::Report;
 use intractor::decode_get_amount_out_response;
 use revm::primitives::alloy_primitives::{Uint, I256, U256};
 
@@ -172,7 +178,7 @@ pub fn cal_cycle_profit(
     let weth = Address::from_str(WETH).unwrap();
 
     for cycle in pointers.clone() {
-        let pairs = cycle
+        let pairs: Vec<&RefCell<Pool>> = cycle
             .iter()
             .filter_map(|pair| state.pairs_mapping.get(&pair.address))
             .collect::<Vec<&RefCell<Pool>>>();
@@ -190,7 +196,12 @@ pub fn cal_cycle_profit(
             profit_function,
         );
         // this needs to be changed
-        let (profit, swap_address) = get_profit_of_cycle(optimal, weth);
+        let (profit, swap_address) = get_profit_of_cycle(
+            convert_u256_to_uint256(optimal),
+            weth,
+            pairs.clone(),
+            cache_db.clone(),
+        );
 
         let mut cycle_internal = Vec::new();
         for pair in pairs {
@@ -211,8 +222,21 @@ pub fn cal_cycle_profit(
     net_profit_cycles.into_iter().take(5).collect()
 }
 
-pub fn get_profit_of_cycle(amount_in: u652, token_in: Address) -> (I256, Vec<u652>) {
-    unimplemented!()
+pub fn get_profit_of_cycle(
+    amount_in: U256,
+    token_in: Address,
+    cycle: Vec<&RefCell<Pool>>,
+    cache_db: Rc<RefCell<AlloyCacheDB>>,
+) -> Result<(I256, Vec<u652>)> {
+    let param = PoolSequence {
+        pool1: Add::from(cycle[0].borrow().id.0),
+        pool2: Add::from(cycle[1].borrow().id.0),
+        pool3: Add::from(cycle[2].borrow().id.0),
+    };
+    let data = get_cycle_calldata(param, amount_in);
+    let mut cache_db_ref = cache_db.borrow_mut();
+    let response = revm_call(Add::ZERO, Add::ZERO, data, &mut cache_db_ref)?;
+    let profit = decode_get_cycle_return_response(response)?;
 }
 
 pub fn get_profit(
