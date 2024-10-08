@@ -78,7 +78,7 @@ pub async fn run() {
     let provider = ProviderBuilder::new().on_http(http_url.parse().unwrap());
     let provider = Arc::new(provider);
 
-    let mut cache_db = init_cache_db(provider);
+    let cache_db = Rc::new(RefCell::new(init_cache_db(provider)));
 
     // now that we have catche file.
     // now we need to find profitable cycles and then we will simulate that 0n cache dp
@@ -102,7 +102,7 @@ pub async fn run() {
     .await;
 
     // what should this recon function do and how should it send txs here ?
-
+    let mut cache_db_ref = cache_db.borrow_mut();
     loop {
         let main_data: recon::mempool::FutureTx = r.recv().unwrap();
         info!("tx received");
@@ -133,7 +133,7 @@ pub async fn run() {
                         Add::from(main_data.tx.from.0),
                         Add::from(main_data.tx.to.unwrap().0),
                         ethers_to_revm(main_data.tx.input.clone()),
-                        &mut cache_db,
+                        &mut cache_db_ref,
                     )
                     .unwrap();
                 }
@@ -141,7 +141,7 @@ pub async fn run() {
         }
 
         let mut potential_cycles =
-            cal_cycle_profit(&state, Some(affected_pairs.clone()), &mut cache_db);
+            cal_cycle_profit(&state, Some(affected_pairs.clone()), cache_db.clone());
     }
 }
 
@@ -149,11 +149,9 @@ pub async fn run() {
 pub fn cal_cycle_profit(
     state: &MutexGuard<State>,
     affected_pair: Option<Vec<Address>>,
-    cache_db: &mut AlloyCacheDB,
+    cache_db: Rc<RefCell<AlloyCacheDB>>,
 ) -> Vec<NetPositiveCycle> {
     let mut pointers: Vec<&Vec<crate::state::IndexedPair>> = Vec::new();
-
-    let cache_db = Rc::new(RefCell::new(cache_db));
 
     match affected_pair {
         Some(affected_pair) => {
@@ -180,8 +178,9 @@ pub fn cal_cycle_profit(
             .collect::<Vec<&RefCell<Pool>>>();
 
         let pairs_clone: Vec<&RefCell<Pool>> = pairs.clone();
+        let cache_db_clone = cache_db.clone();
         let profit_function = move |amount_in: U256| -> I256 {
-            get_profit(weth, amount_in, &pairs_clone, cache_db).unwrap()
+            get_profit(weth, amount_in, &pairs_clone, cache_db_clone.clone()).unwrap()
         };
 
         let optimal: u652 = maximize_profit(
@@ -285,12 +284,6 @@ pub fn volumes(from: U256, to: U256, count: usize) -> Vec<U256> {
     volumes.reverse();
     volumes
 }
-
-// fn convert_u256_to_uint256(u256: U256) -> Uint<256, 4> {
-//     let mut bytes: [u8; 32] = [0u8; 32]; // U256 is 32 bytes
-//     u256.to_little_endian(&mut bytes); // fill bytes with U256 data
-//     Uint::<256, 4>::from_le_bytes(bytes)
-// }
 
 fn ethers_to_revm(ethers_bytes: ethBytes) -> Bytes {
     Bytes(ethers_bytes.0) // Access the inner Vec<u8> and construct revm::Bytes
