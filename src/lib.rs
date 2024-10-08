@@ -11,15 +11,19 @@ use eyre::Ok;
 use log::info;
 pub mod recon;
 use std::cell::RefCell;
+pub mod calculate;
 pub mod state;
 use crate::contract_modules::UniV3::bindings::UniswapV3Router;
 use crate::contract_modules::UniV3::types::UniV3Pool;
 use crate::uniV3PoolGetter::PoolsData;
+use calculate::maximize_profit;
+use calculate::NetPositiveCycle;
 use constants::UniswapV3Pool;
 use constants::EXECUATOR_ADDRESS;
 use crossbeam_channel::unbounded;
 use dotenv::dotenv;
 use ethers::abi::Address;
+use ethers::types::U256 as u652;
 use ethers::{
     contract::abigen,
     providers::{Middleware, Provider},
@@ -67,11 +71,9 @@ pub async fn run() {
 
     let config = Config::new().await;
 
-    let http_url = std::env::var("NETWORK_HTTP").expect("missing NETWORK_RPC");
-    let provider = ProviderBuilder::new().on_http(http_url.parse().unwrap());
-    let provider = Arc::new(provider);
-
-    let mut cache_db = init_cache_db(provider);
+    // let http_url = std::env::var("NETWORK_HTTP").expect("missing NETWORK_RPC");
+    // let provider = ProviderBuilder::new().on_http(http_url.parse().unwrap());
+    // let provider = Arc::new(provider);
 
     // now that we have catche file.
     // now we need to find profitable cycles and then we will simulate that 0n cache dp
@@ -106,7 +108,7 @@ pub fn cal_cycle_profit(
     state: &MutexGuard<State>,
     affected_pair: Option<Vec<Address>>,
     cache_db: &mut AlloyCacheDB,
-) {
+) -> Vec<NetPositiveCycle> {
     let mut pointers: Vec<&Vec<crate::state::IndexedPair>> = Vec::new();
 
     match affected_pair {
@@ -123,8 +125,7 @@ pub fn cal_cycle_profit(
             }
         }
     }
-
-    //let mut net_profit_cycle = Vec::new();
+    let mut net_profit_cycles = Vec::new();
 
     let weth = Address::from_str(WETH).unwrap();
 
@@ -134,22 +135,47 @@ pub fn cal_cycle_profit(
             .filter_map(|pair| state.pairs_mapping.get(&pair.address))
             .collect::<Vec<&RefCell<Pool>>>();
 
-        let mut cache_clone = cache_db.clone();
         let pairs_clone: Vec<&RefCell<Pool>> = pairs.clone();
-        let profit_function = move |amount_in: U256| -> I256 {
-            get_profit(weth, amount_in, &pairs_clone, &mut cache_clone).unwrap()
-        };
+        let profit_function =
+            move |amount_in: U256| -> I256 { get_profit(weth, amount_in, &pairs_clone).unwrap() };
 
-        // here we need ti change get_profit
+        let optimal: u652 = maximize_profit(
+            u652::one(),
+            u652::from_dec_str("10000000000000000000000").unwrap(),
+            u652::from_dec_str("10").unwrap(),
+            profit_function,
+        );
+        // this needs to be changed
+        let (profit, swap_address) = get_profit_of_cycle(optimal, weth);
+
+        let mut cycle_internal = Vec::new();
+        for pair in pairs {
+            cycle_internal.push(pair.borrow().id);
+        }
+
+        if profit > I256::ONE {
+            let net_positive_cycle = NetPositiveCycle {
+                profit,
+                optimal_in: optimal,
+                swap_amounts: swap_address,
+                cycle_addresses: cycle_internal,
+            };
+            net_profit_cycles.push(net_positive_cycle);
+        }
     }
+    net_profit_cycles.sort();
+    net_profit_cycles.into_iter().take(5).collect()
 }
 
-pub fn get_profit(
-    asset_in: Address,
-    amount_in: U256,
-    pairs: &Vec<&RefCell<Pool>>,
-    cache_db: &mut AlloyCacheDB,
-) -> Result<I256> {
+pub fn get_profit_of_cycle(amount_in: u652, token_in: Address) -> (I256, Vec<u652>) {
+    unimplemented!()
+}
+
+pub fn get_profit(asset_in: Address, amount_in: U256, pairs: &Vec<&RefCell<Pool>>) -> Result<I256> {
+    let http_url = std::env::var("NETWORK_HTTP").expect("missing NETWORK_RPC");
+    let provider = ProviderBuilder::new().on_http(http_url.parse().unwrap());
+    let provider = Arc::new(provider);
+    let mut cache_db = init_cache_db(provider);
     // Use eyre::Result for error handling
     let mut amount_out: U256 = amount_in;
     let mut token_in: Address = asset_in;
@@ -181,7 +207,7 @@ pub fn get_profit(
             Add::from_str(EXECUATOR_ADDRESS).unwrap(),
             Add::from(pair.id.0),
             calldata,
-            cache_db,
+            &mut cache_db,
         )
         .unwrap();
 

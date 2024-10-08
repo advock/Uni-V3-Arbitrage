@@ -4,6 +4,7 @@ use crate::helper;
 use crate::{contract_modules::UniV3::types::UniV3Pool, uniV3PoolGetter};
 use abi::Hash;
 use ethers::prelude::*;
+use ethers::types::Address;
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
