@@ -9,8 +9,7 @@ use std::cmp::Ordering;
 pub struct NetPositiveCycle {
     pub profit: I256,
     pub optimal_in: U256,
-    pub swap_amounts: Vec<U256>,
-    pub cycle_addresses: Vec<Address>,
+    pub swap_pool: Vec<Address>,
 }
 
 impl Ord for NetPositiveCycle {

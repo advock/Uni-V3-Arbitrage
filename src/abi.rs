@@ -5,6 +5,7 @@ use revm::primitives::alloy_primitives::Signed;
 use revm::primitives::alloy_primitives::Uint;
 use revm::primitives::alloy_primitives::U256 as U;
 use revm::primitives::{Address, Bytes, I256};
+
 sol! {
     struct PoolSequence{
         address pool1;

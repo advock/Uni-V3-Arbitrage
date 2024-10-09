@@ -12,7 +12,6 @@ use abi::decode_get_cycle_return_response;
 use abi::get_cycle_calldata;
 use abi::PoolSequence;
 use ethers::prelude::*;
-use eyre::Ok;
 use helper::revm_call;
 use log::info;
 pub mod recon;
@@ -196,12 +195,13 @@ pub fn cal_cycle_profit(
             profit_function,
         );
         // this needs to be changed
-        let (profit, swap_address) = get_profit_of_cycle(
+        let (profit, swap_addresses) = get_profit_of_cycle(
             convert_u256_to_uint256(optimal),
             weth,
             pairs.clone(),
             cache_db.clone(),
-        );
+        )
+        .unwrap();
 
         let mut cycle_internal = Vec::new();
         for pair in pairs {
@@ -212,8 +212,7 @@ pub fn cal_cycle_profit(
             let net_positive_cycle = NetPositiveCycle {
                 profit,
                 optimal_in: optimal,
-                swap_amounts: swap_address,
-                cycle_addresses: cycle_internal,
+                swap_pool: swap_addresses,
             };
             net_profit_cycles.push(net_positive_cycle);
         }
@@ -227,7 +226,7 @@ pub fn get_profit_of_cycle(
     token_in: Address,
     cycle: Vec<&RefCell<Pool>>,
     cache_db: Rc<RefCell<AlloyCacheDB>>,
-) -> Result<(I256, Vec<u652>)> {
+) -> Result<(I256, Vec<Address>)> {
     let param = PoolSequence {
         pool1: Add::from(cycle[0].borrow().id.0),
         pool2: Add::from(cycle[1].borrow().id.0),
@@ -237,6 +236,12 @@ pub fn get_profit_of_cycle(
     let mut cache_db_ref = cache_db.borrow_mut();
     let response = revm_call(Add::ZERO, Add::ZERO, data, &mut cache_db_ref)?;
     let profit = decode_get_cycle_return_response(response)?;
+    let mut pools: Vec<Address> = Vec::new();
+    pools.push(cycle[0].borrow().id);
+    pools.push(cycle[1].borrow().id);
+    pools.push(cycle[2].borrow().id);
+
+    Ok((profit, pools))
 }
 
 pub fn get_profit(
