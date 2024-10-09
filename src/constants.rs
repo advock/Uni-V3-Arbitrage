@@ -2,6 +2,8 @@ use ethers::prelude::*;
 use ethers::types::Address;
 
 pub const EXECUATOR_ADDRESS: &str = "0x....";
+pub const CALLER: &str = "0x....";
+pub const FROM: &str = "0x...";
 pub const WETH: &str = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
 // below event is pool created
 pub const SYNC: &str = "783cca1c0412dd0d695e784568c96da2e9c22ff989357a2e8b1d9b2b4e6b7118";

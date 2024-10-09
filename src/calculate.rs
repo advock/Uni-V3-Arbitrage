@@ -68,7 +68,7 @@ pub fn maximize_profit(
     (domain_max + domain_min) / 2
 }
 
-fn convert_u256_to_uint256(u256: U256) -> Uint<256, 4> {
+pub fn convert_u256_to_uint256(u256: U256) -> Uint<256, 4> {
     let mut bytes: [u8; 32] = [0u8; 32]; // U256 is 32 bytes
     u256.to_little_endian(&mut bytes); // fill bytes with U256 data
     Uint::<256, 4>::from_le_bytes(bytes)

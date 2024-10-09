@@ -1,4 +1,5 @@
 pub mod abi;
+pub mod caller;
 pub mod config;
 pub mod constants;
 pub mod contract_modules;
@@ -11,7 +12,9 @@ use abi::convert_u256_to_uint256;
 use abi::decode_get_cycle_return_response;
 use abi::get_cycle_calldata;
 use abi::PoolSequence;
+use caller::get_execute_cycle_swap_data;
 use ethers::prelude::*;
+use ethers::types::transaction::eip2718::TypedTransaction;
 use helper::revm_call;
 use log::info;
 pub mod recon;
@@ -41,6 +44,7 @@ use eyre::Report;
 use intractor::decode_get_amount_out_response;
 use revm::primitives::alloy_primitives::{Uint, I256, U256};
 
+use ethers::prelude::k256::ecdsa::SigningKey;
 use revm::primitives::Address as Add;
 use revm::primitives::Bytes;
 use revm::primitives::{ExecutionResult, TransactTo};
@@ -145,11 +149,52 @@ pub async fn run() {
             }
         }
 
-        let mut potential_cycles =
+        let mut potential_cycles: Vec<NetPositiveCycle> =
             cal_cycle_profit(&state, Some(affected_pairs.clone()), cache_db.clone());
+
+        if !potential_cycles.is_empty() {
+            let from = Address::from_str(constants::FROM).unwrap();
+            let to = Address::from_str(constants::CALLER).unwrap();
+
+            let recipt: TransactionReceipt = execute_arb(
+                from,
+                to,
+                potential_cycles[0].swap_pool.clone(),
+                potential_cycles[0].optimal_in,
+                config.http.clone(),
+            )
+            .await
+            .unwrap();
+            print!("recipt {:?}", recipt);
+        }
     }
 }
 
+// Add this function to send the transaction
+async fn execute_arb(
+    from: Address,
+    to: Address,
+    pools: Vec<Address>,
+    amount: u652,
+    client: Arc<SignerMiddleware<Provider<Http>, Wallet<SigningKey>>>,
+) -> Result<TransactionReceipt, Box<dyn std::error::Error>> {
+    let nonce = client.get_transaction_count(from, None).await?;
+
+    let data = get_execute_cycle_swap_data(pools, amount, Add::from(to.0));
+
+    let ethers_data = ethBytes::from(data.to_vec());
+
+    let tx = TransactionRequest::new()
+        .from(from)
+        .to(to)
+        .data(ethers_data)
+        .nonce(nonce);
+
+    let pending_tx = client.send_transaction(tx, None).await?;
+
+    let receipt = pending_tx.await?.unwrap();
+    Ok(receipt)
+}
 // input all the potential cycles of affected pair:
 pub fn cal_cycle_profit(
     state: &MutexGuard<State>,
